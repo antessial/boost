@@ -1,0 +1,98 @@
+// 001 - date YYYY.MM.DD validator, mostly Spirit + Lambda.
+// The task is trivial enough for just regex and tokens,
+// but I ignored them here for educational purposes.
+// The structure is not completely strict, year may be of any length.
+// Tbh, it overall turned out to be way more complex than it seems.
+
+// some Boost sorcery here
+#define _SILENCE_FPOS_SEEKPOS_DEPRECATION_WARNING
+#define BOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE
+
+#include <iostream>
+#include <boost/spirit/include/qi.hpp>
+#include <boost/lambda/lambda.hpp>
+#include <boost/spirit/include/phoenix_operator.hpp>
+
+namespace dater {
+	struct Date {
+		int year, month, day;
+	};
+}
+
+BOOST_FUSION_ADAPT_STRUCT(
+	dater::Date,
+	(int, year)
+	(int, month)
+	(int, day)
+)
+
+namespace dater {
+	using namespace boost::spirit;
+
+	template <typename Iterator>
+	struct TwoDigitNum : qi::grammar<Iterator, int> {
+
+		qi::rule <Iterator, int> tdnrule;
+
+		TwoDigitNum() : TwoDigitNum::base_type(tdnrule) {
+			tdnrule = eps[_val = 0] 
+             >> qi::digit[_val += (_1-'0') * 10] 
+             >> qi::digit[_val += (_1-'0')];
+		}
+	};
+
+	template <typename Iterator>
+	struct DateParser : qi::grammar<Iterator, Date()> {
+
+		dater::TwoDigitNum<std::string::const_iterator> tdn_;
+		qi::rule <Iterator, Date()> dprule;
+
+		DateParser() : DateParser::base_type(dprule) {
+			//non-strict months and days are as easy as this: dprule %= int_ >> '.' >> int_ >> '.' >> int_;
+			dprule %= int_ >> '.' >> tdn_ >> '.' >> tdn_;
+		}
+	};
+
+	bool validateDate(std::string presumablyDate) { 
+		
+		std::string::iterator it = presumablyDate.begin();
+		bool valid = false;
+		
+		typedef dater::DateParser<std::string::const_iterator> DateParser;
+		DateParser date_;
+		Date date;
+
+		// It. Just. Works.
+		// I have spent about 8 hours to get to the following three lines,
+		// but since I got them, they became pretty self-explanatory.
+		// Yes, I've spent that much time just because I wanted to see how Boost Lambda works.
+		#define _year &boost::lambda::_1 ->* &dater::Date::year
+		#define _month &boost::lambda::_1 ->* &dater::Date::month
+		#define _day &boost::lambda::_1 ->* &dater::Date::day
+
+		// We've got 28 as a base value, months are being stored as 0-3 values
+		// which designates the difference for each month (28~31 = 28 + 0~3),
+		// at first which we extract the needed month's value and add it to 28,
+		// then we see if it's a leap year and add 1 if needed.
+		// Of course, it should be optimizable, but it is pretty messy as it is.
+		bool a = qi::parse(it, presumablyDate.end(), 
+				date_[
+					boost::lambda::var(valid) = _month > 0 && _month < 13 && _year > 0 && _day > 0 &&
+						_day <= 28 + ((0x3bbeecc >> (2 * _month)) & 3) +
+						(_month == 2 && _year % 4 == 0 && (_year % 100 != 0 || _year % 400 == 0))
+				],
+			date);
+		return (it == presumablyDate.end()) && a && valid;
+	}
+}
+int main() {
+
+	std::string ans;
+	while (true) {
+		std::cout << "Enter your date in YYYY.MM.DD format, please: ";
+		std::cin >> ans;
+		std::cout << "Result: " << dater::validateDate(ans) << "\n";
+	}
+
+	return 0;
+}
